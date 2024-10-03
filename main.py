@@ -1,3 +1,4 @@
+
 import datetime
 import enum
 import json
@@ -40,6 +41,7 @@ class TvDatafeed:
         self,
         username: str = None,
         password: str = None,
+        auth_token: str = None,
     ) -> None:
         """Create TvDatafeed object
 
@@ -50,7 +52,10 @@ class TvDatafeed:
 
         self.ws_debug = False
 
-        self.token = self.__auth(username, password)
+        if auth_token:
+            self.token = auth_token
+        else:
+            self.token = self.__auth(username, password)
 
         if self.token is None:
             self.token = "unauthorized_user_token"
@@ -63,23 +68,28 @@ class TvDatafeed:
         self.chart_session = self.__generate_chart_session()
 
     def __auth(self, username, password):
+        if username is None or password is None:
+            logger.warning("Username or password is None.")
+            return None
 
-        if (username is None or password is None):
-            token = None
+        data = {"username": username, "password": password, "remember": "on"}
 
-        else:
-            data = {"username": username,
-                    "password": password,
-                    "remember": "on"}
-            try:
-                response = requests.post(
-                    url=self.__sign_in_url, data=data, headers=self.__signin_headers)
-                token = response.json()['user']['auth_token']
-            except Exception as e:
-                logger.error('error while signin')
-                token = None
+        try:
+            response = requests.post(url=self.__sign_in_url, data=data, headers=self.__signin_headers)
+            response_data = response.json()
 
-        return token
+            # Check if the response contains the auth_token
+            if 'user' in response_data and 'auth_token' in response_data['user']:
+                token = response_data['user']['auth_token']
+                logger.info("Authorization successful.")
+                return token
+            else:
+                logger.error("Authorization failed. Response: %s", response_data)
+                return None
+
+        except Exception as e:
+            logger.error('Error during sign-in: %s', e)
+            return None
 
     def __create_connection(self):
         logging.debug("creating websocket connection")
@@ -185,34 +195,34 @@ class TvDatafeed:
 
         return symbol
 
-  def get_hist(
-    self,
-    symbol: str,
-    exchange: str = "NSE",
-    interval: Interval = Interval.in_daily,
-    n_bars: int = 10,
-    fut_contract: int = None,
-    extended_session: bool = False,
-) -> pd.DataFrame:
-    """get historical data
+    def get_hist(
+        self,
+        symbol: str,
+        exchange: str = "NSE",
+        interval: Interval = Interval.in_daily,
+        n_bars: int = 10,
+        fut_contract: int = None,
+        extended_session: bool = False,
+    ) -> pd.DataFrame:
+        """get historical data
 
-    Args:
-        symbol (str): symbol name
-        exchange (str, optional): exchange, not required if symbol is in format EXCHANGE:SYMBOL. Defaults to None.
-        interval (str, optional): chart interval. Defaults to 'D'.
-        n_bars (int, optional): no of bars to download, max 5000. Defaults to 10.
-        fut_contract (int, optional): None for cash, 1 for continuous current contract in front, 2 for continuous next contract in front . Defaults to None.
-        extended_session (bool, optional): regular session if False, extended session if True, Defaults to False.
+        Args:
+            symbol (str): symbol name
+            exchange (str, optional): exchange, not required if symbol is in format EXCHANGE:SYMBOL. Defaults to None.
+            interval (str, optional): chart interval. Defaults to 'D'.
+            n_bars (int, optional): no of bars to download, max 5000. Defaults to 10.
+            fut_contract (int, optional): None for cash, 1 for continuous current contract in front, 2 for continuous next contract in front . Defaults to None.
+            extended_session (bool, optional): regular session if False, extended session if True, Defaults to False.
 
-    Returns:
-        pd.Dataframe: dataframe with sohlcv as columns
-    """
-    symbol = self.__format_symbol(
-        symbol=symbol, exchange=exchange, contract=fut_contract
-    )
+        Returns:
+            pd.Dataframe: dataframe with sohlcv as columns
+        """
+        symbol = self.__format_symbol(
+            symbol=symbol, exchange=exchange, contract=fut_contract
+        )
 
-    interval = interval.value
-    while True:
+        interval = interval.value
+
         self.__create_connection()
 
         self.__send_message("set_auth_token", [self.token])
@@ -250,7 +260,7 @@ class TvDatafeed:
 
         self.__send_message(
             "quote_add_symbols", [self.session, symbol,
-                                {"flags": ["force_permission"]}]
+                                  {"flags": ["force_permission"]}]
         )
         self.__send_message("quote_fast_symbols", [self.session, symbol])
 
@@ -276,19 +286,18 @@ class TvDatafeed:
         raw_data = ""
 
         logger.debug(f"getting data for {symbol}...")
-    
-        try:
-            result = self.ws.recv()
-            raw_data = raw_data + result + "\n"
-        except Exception as e:
-            logger.error(e)
-            # break
+        while True:
+            try:
+                result = self.ws.recv()
+                raw_data = raw_data + result + "\n"
+            except Exception as e:
+                logger.error(e)
+                break
 
-        if "series_completed" in result:
-            break
+            if "series_completed" in result:
+                break
 
-    return self.__create_df(raw_data, symbol)
-
+        return self.__create_df(raw_data, symbol)
 
     def search_symbol(self, text: str, exchange: str = ''):
         url = self.__search_url.format(text, exchange)
@@ -309,13 +318,13 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     tv = TvDatafeed()
     print(tv.get_hist("CRUDEOIL", "MCX", fut_contract=1))
-    print(tv.get_hist("NIFTY", "NSE", fut_contract=1))
+    #print(tv.get_hist("NIFTY", "NSE", fut_contract=1))
     print(
         tv.get_hist(
             "EICHERMOT",
             "NSE",
             interval=Interval.in_1_hour,
-            n_bars=500,
+            n_bars=50000000,
             extended_session=False,
         )
     )
