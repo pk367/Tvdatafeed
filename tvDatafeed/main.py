@@ -324,7 +324,7 @@ if __name__ == "__main__":
             "EICHERMOT",
             "NSE",
             interval=Interval.in_1_hour,
-            n_bars=50000000,
+            n_bars=500,
             extended_session=False,
         )
     )
